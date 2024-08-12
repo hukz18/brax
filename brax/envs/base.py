@@ -186,6 +186,10 @@ class Wrapper(Env):
   @property
   def observation_size(self) -> int:
     return self.env.observation_size
+  
+  @property
+  def privileged_observation_size(self) -> int:
+    return self.env.privileged_observation_size
 
   @property
   def action_size(self) -> int:
