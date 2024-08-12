@@ -44,10 +44,12 @@ def actor_step(
   state_extras = {x: nstate.info[x] for x in extra_fields}
   return nstate, Transition(  # pytype: disable=wrong-arg-types  # jax-ndarray
       observation=env_state.obs,
+      privileged_observation=env_state.privileged_obs,
       action=actions,
       reward=nstate.reward,
       discount=1 - nstate.done,
       next_observation=nstate.obs,
+      next_privileged_observation=nstate.privileged_obs,
       extras={
           'policy_extras': policy_extras,
           'state_extras': state_extras

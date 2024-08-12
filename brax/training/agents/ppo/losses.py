@@ -134,10 +134,10 @@ def compute_ppo_loss(
   policy_logits = policy_apply(normalizer_params, params.policy,
                                data.observation)
 
-  baseline = value_apply(normalizer_params, params.value, data.observation)
+  baseline = value_apply(normalizer_params, params.value, data.privileged_observation)
 
   bootstrap_value = value_apply(normalizer_params, params.value,
-                                data.next_observation[-1])
+                                data.next_privileged_observation[-1])
 
   rewards = data.reward * reward_scaling
   truncation = data.extras['state_extras']['truncation']

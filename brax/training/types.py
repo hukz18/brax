@@ -42,10 +42,12 @@ NetworkType = TypeVar('NetworkType')
 class Transition(NamedTuple):
   """Container for a transition."""
   observation: NestedArray
+  privileged_observation: NestedArray
   action: NestedArray
   reward: NestedArray
   discount: NestedArray
   next_observation: NestedArray
+  next_privileged_observation: NestedArray
   extras: NestedArray = ()  # pytype: disable=annotation-type-mismatch  # jax-ndarray
 
 
