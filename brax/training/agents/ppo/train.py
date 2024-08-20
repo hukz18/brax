@@ -19,7 +19,7 @@ See: https://arxiv.org/pdf/1707.06347.pdf
 
 import functools
 import time
-from typing import Callable, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Tuple, Union
 
 from absl import logging
 from brax import base
@@ -81,6 +81,7 @@ def train(
     max_devices_per_host: Optional[int] = None,
     num_eval_envs: int = 128,
     learning_rate: float = 1e-4,
+    learning_rate_schedule_fn: Optional[Callable[..., Any]] = None,
     entropy_cost: float = 1e-4,
     discounting: float = 0.9,
     seed: int = 0,
@@ -239,7 +240,11 @@ def train(
       preprocess_observations_fn=normalize)
   make_policy = ppo_networks.make_inference_fn(ppo_network)
 
-  optimizer = optax.adam(learning_rate=learning_rate)
+  if learning_rate_schedule_fn is None:
+    # Default linear decay schedule
+    learning_rate_schedule_fn = optax.constant_schedule(value=learning_rate)
+
+  optimizer = optax.adam(learning_rate=learning_rate_schedule_fn)
 
   loss_fn = functools.partial(
       ppo_losses.compute_ppo_loss,
