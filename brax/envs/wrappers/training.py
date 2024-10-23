@@ -111,6 +111,8 @@ class AutoResetWrapper(Wrapper):
     state = self.env.reset(rng)
     state.info['first_pipeline_state'] = state.pipeline_state
     state.info['first_obs'] = state.obs
+    if 'episode_num' not in state.info:
+        state.info['episode_num'] = jp.zeros_like(state.done)
     return state
 
   def step(self, state: State, action: jax.Array) -> State:
@@ -131,6 +133,9 @@ class AutoResetWrapper(Wrapper):
         where_done, state.info['first_pipeline_state'], state.pipeline_state
     )
     obs = where_done(state.info['first_obs'], state.obs)
+    state.info['episode_num'] = jp.where(
+        state.done, state.info['episode_num'] + 1, state.info['episode_num']
+    )
     return state.replace(pipeline_state=pipeline_state, obs=obs)
 
 
@@ -164,6 +169,8 @@ class EvalWrapper(Wrapper):
         episode_steps=jp.zeros_like(reset_state.reward),
     )
     reset_state.info['eval_metrics'] = eval_metrics
+    if 'episode_num' not in reset_state.info:
+        reset_state.info["episode_num"] = jp.zeros_like(reset_state.done)
     return reset_state
 
   def step(self, state: State, action: jax.Array) -> State:

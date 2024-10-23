@@ -63,7 +63,7 @@ def _unpmap(v):
   return jax.tree_util.tree_map(lambda x: x[0], v)
 
 
-def _strip_weak_type(tree):
+def _strip_weak_type(tree): # what's weak type?
   # brax user code is sometimes ambiguous about weak_type.  in order to
   # avoid extra jit recompilations we strip all weak types from user input
   def f(leaf):
@@ -104,6 +104,9 @@ def train(
     eval_env: Optional[envs.Env] = None,
     policy_params_fn: Callable[..., None] = lambda *args: None,
     randomization_fn: Optional[
+        Callable[[base.System, jnp.ndarray], Tuple[base.System, base.System]]
+    ] = None,
+    eval_randomization_fn: Optional[
         Callable[[base.System, jnp.ndarray], Tuple[base.System, base.System]]
     ] = None,
     restore_checkpoint_path: Optional[str] = None,
@@ -256,6 +259,9 @@ def train(
       clipping_epsilon=clipping_epsilon,
       normalize_advantage=normalize_advantage)
 
+  # gradient_update_fn = gradients.gradient_update_fn(
+  #     loss_fn, optimizer, None, has_aux=True
+  # )
   gradient_update_fn = gradients.gradient_update_fn(
       loss_fn, optimizer, pmap_axis_name=_PMAP_AXIS_NAME, has_aux=True)
 
@@ -317,8 +323,7 @@ def train(
         length=batch_size * num_minibatches // num_envs)
     # Have leading dimensions (batch_size * num_minibatches, unroll_length)
     data = jax.tree_util.tree_map(lambda x: jnp.swapaxes(x, 1, 2), data)
-    data = jax.tree_util.tree_map(lambda x: jnp.reshape(x, (-1,) + x.shape[2:]),
-                                  data)
+    data = jax.tree_util.tree_map(lambda x: jnp.reshape(x, (-1,) + x.shape[2:]), data)
     assert data.discount.shape[1:] == (unroll_length,)
 
     # Update normalization params and normalize observations.
@@ -415,15 +420,15 @@ def train(
 
   if not eval_env:
     eval_env = environment
-  if randomization_fn is not None:
-    v_randomization_fn = functools.partial(
-        randomization_fn, rng=jax.random.split(eval_key, num_eval_envs)
+  if eval_randomization_fn is not None:
+    v_eval_randomization_fn = functools.partial(
+        eval_randomization_fn, rng=jax.random.split(eval_key, num_eval_envs)
     )
   eval_env = wrap_for_training(
       eval_env,
       episode_length=episode_length,
       action_repeat=action_repeat,
-      randomization_fn=v_randomization_fn,
+      randomization_fn=v_eval_randomization_fn,
   )
 
   evaluator = acting.Evaluator(
@@ -436,13 +441,14 @@ def train(
 
   # Run initial eval
   metrics = {}
-  if process_id == 0 and num_evals > 1:
-    metrics = evaluator.run_evaluation(
-        _unpmap(
-            (training_state.normalizer_params, training_state.params.policy)),
-        training_metrics={})
-    logging.info(metrics)
-    progress_fn(0, metrics)
+  # if process_id == 0 and num_evals > 1:
+  #     print("running initial eval")
+  #     metrics = evaluator.run_evaluation(
+  #         _unpmap((training_state.normalizer_params, training_state.params.policy)),
+  #         training_metrics={},
+  #     )
+  #     logging.info(metrics)
+  #     progress_fn(0, metrics)
 
   training_metrics = {}
   training_walltime = 0
@@ -471,6 +477,12 @@ def train(
           _unpmap(
               (training_state.normalizer_params, training_state.params.policy)),
           training_metrics)
+      # add env_state.metrics to metrics
+      if env_state.metrics:
+          # average env_state.metrics
+          metrics.update(
+              jax.tree_util.tree_map(lambda x: jnp.mean(x), env_state.metrics)
+          )
       logging.info(metrics)
       progress_fn(current_step, metrics)
       params = _unpmap(

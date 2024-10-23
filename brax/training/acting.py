@@ -14,8 +14,12 @@
 
 """Brax training acting functions."""
 
+import os
 import time
-from typing import Callable, Sequence, Tuple, Union
+from typing import Any, Callable, List, Sequence, Tuple, Union
+
+import mediapy as media
+from moviepy.editor import VideoFileClip, clips_array
 
 from brax import envs
 from brax.training.types import Metrics
@@ -29,6 +33,37 @@ import numpy as np
 
 State = Union[envs.State, envs_v1.State]
 Env = Union[envs.Env, envs_v1.Env, envs_v1.Wrapper]
+
+
+def render_video(
+    env: Env,
+    rollout: List[Any],
+    run_name: str,
+    render_every: int = 2,
+    height: int = 360,
+    width: int = 640,
+):
+    # Define paths for each camera's video
+    video_paths: List[str] = []
+
+    # Render and save videos for each camera
+    for camera in ["perspective", "side", "top", "front"]:
+        video_path = os.path.join("results", run_name, f"{camera}.mp4")
+        media.write_video(
+            video_path,
+            env.render(
+                rollout[::render_every], height=height, width=width, camera=camera
+            ),
+            fps=1.0 / env.dt / render_every,
+        )
+        video_paths.append(video_path)
+
+    # Load the video clips using moviepy
+    clips = [VideoFileClip(path) for path in video_paths]
+    # Arrange the clips in a 2x2 grid
+    final_video = clips_array([[clips[0], clips[1]], [clips[2], clips[3]]])
+    # Save the final concatenated video
+    final_video.write_videofile(os.path.join("results", run_name, "eval.mp4"))
 
 
 def actor_step(
@@ -84,8 +119,8 @@ class Evaluator:
   """Class to run evaluations."""
 
   def __init__(self, eval_env: envs.Env,
-               eval_policy_fn: Callable[[PolicyParams],
-                                        Policy], num_eval_envs: int,
+               eval_policy_fn: Callable[[PolicyParams], Policy], 
+               num_eval_envs: int,
                episode_length: int, action_repeat: int, key: PRNGKey):
     """Init.
 
