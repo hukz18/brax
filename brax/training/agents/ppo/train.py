@@ -102,6 +102,7 @@ def train(
     progress_fn: Callable[[int, Metrics], None] = lambda *args: None,
     normalize_advantage: bool = True,
     eval_env: Optional[envs.Env] = None,
+    render_interval: Optional[int] = 0,
     policy_params_fn: Callable[..., None] = lambda *args: None,
     randomization_fn: Optional[
         Callable[[base.System, jnp.ndarray], Tuple[base.System, base.System]]
@@ -110,6 +111,7 @@ def train(
         Callable[[base.System, jnp.ndarray], Tuple[base.System, base.System]]
     ] = None,
     restore_checkpoint_path: Optional[str] = None,
+    run_name: Optional[str] = None,
 ):
   """PPO training.
 
@@ -437,7 +439,9 @@ def train(
       num_eval_envs=num_eval_envs,
       episode_length=episode_length,
       action_repeat=action_repeat,
-      key=eval_key)
+      key=eval_key,
+      render_interval=render_interval,
+    )
 
   # Run initial eval
   metrics = {}
@@ -445,7 +449,7 @@ def train(
   #     print("running initial eval")
   #     metrics = evaluator.run_evaluation(
   #         _unpmap((training_state.normalizer_params, training_state.params.policy)),
-  #         training_metrics={},
+  #         training_metrics={}, run_name=run_name
   #     )
   #     logging.info(metrics)
   #     progress_fn(0, metrics)
@@ -476,7 +480,7 @@ def train(
       metrics = evaluator.run_evaluation(
           _unpmap(
               (training_state.normalizer_params, training_state.params.policy)),
-          training_metrics)
+          training_metrics, run_name=run_name, current_step=current_step)
       # add env_state.metrics to metrics
       if env_state.metrics:
           # average env_state.metrics
