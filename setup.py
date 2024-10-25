@@ -19,8 +19,7 @@ Install for development:
   pip intall -e .
 """
 
-from setuptools import find_packages
-from setuptools import setup
+from setuptools import find_packages, setup
 
 setup(
     name="brax",
@@ -47,8 +46,8 @@ setup(
         # TODO: remove grpcio and gym after dropping legacy v1 code
         "grpcio",
         "gym",
-        "jax>=0.4.6",
-        "jaxlib>=0.4.6",
+        "jax==0.4.28",
+        "jaxlib==0.4.28",
         "jaxopt",
         "jinja2",
         "ml_collections",
@@ -56,7 +55,7 @@ setup(
         "mujoco-mjx",
         "numpy",
         "optax",
-        "orbax-checkpoint",
+        "orbax-checkpoint==0.5.23",
         # TODO: remove pytinyrenderer after dropping legacy v1 code
         "Pillow",
         "pytinyrenderer",
