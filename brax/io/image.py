@@ -16,6 +16,7 @@
 
 import io
 from typing import List, Optional, Sequence, Union
+import jax
 from tqdm import tqdm
 import math
 import brax
@@ -27,7 +28,7 @@ import multiprocessing as mp
 from joblib import Parallel, delayed
 
 
-def get_image(model: mujoco.MjModel, state: base.State, height: int, width: int, camera: Optional[str]=None, spacing: Optional[float]=1.0, num_vis: Optional[int]=25) -> np.ndarray:
+def get_image(model: mujoco.MjModel, state: base.State, height: int, width: int, camera: Optional[str]=-1, spacing: Optional[float]=1.0, num_vis: Optional[int]=25) -> np.ndarray:
   # model = mujoco.MjModel.from_xml_path(model_xml)
   renderer = mujoco.Renderer(model, height=height, width=width)
   data = mujoco.MjData(model)
@@ -56,13 +57,17 @@ def get_image(model: mujoco.MjModel, state: base.State, height: int, width: int,
     mujoco.mj_forward(model, data)
 
     # Set up the camera to encompass the entire grid
+    # camera = mujoco.MjvCamera()
+    # camera.lookat[:] = [0, (grid_rows - 1) * spacing / 2, 0]  # Adjust Z as needed
+
+    # camera.distance = max(grid_cols, grid_rows) * spacing # Zoom out to fit all models
+    # camera.azimuth = 0
+    # camera.elevation = -30 # Look down at the models
     camera = mujoco.MjvCamera()
     camera.lookat[:] = [0, (grid_rows - 1) * spacing / 2, 0]  # Adjust Z as needed
-
-    camera.distance = max(grid_cols, grid_rows) * spacing # Zoom out to fit all models
+    camera.distance = 4.5  # Zoom out to fit all models
     camera.azimuth = 0
-    camera.elevation = -30 # Look down at the models
-
+    camera.elevation = -45  # Look down at the models
     # Update the scene with static elements
     renderer.update_scene(data, camera=camera)
 
@@ -92,27 +97,24 @@ def render_array(
     width: int = 320,
     camera: Optional[str] = None,
 ) -> Union[Sequence[np.ndarray], np.ndarray]:
-  """Returns a sequence of np.ndarray images using the MuJoCo renderer."""
-  
-  camera = camera or -1
-  # if isinstance(trajectory, list):
-  #   return [get_image(s) for s in trajectory]
+    """Returns a sequence of np.ndarray images using the MuJoCo renderer."""
 
-  if isinstance(trajectory, list):
-      # Prepare arguments for multiprocessing
-      args = [(sys.mj_model, state, height, width) for state in trajectory]
-      # with mp.Pool(processes=32) as pool:
-          # Use imap for progress tracking with tqdm
-          # frames = list(tqdm(pool.imap(get_image, args), total=len(trajectory), desc="Rendering frames"))
-      frames = Parallel(n_jobs=-1)(
-            delayed(get_image)(*arg) for arg in tqdm(args, desc="Rendering frames")
-        )
-      # frames = [get_image(*arg) for arg in tqdm(args, desc="Rendering frames")]
-      return frames
+    if isinstance(trajectory, list):
+        if trajectory[0].q.ndim == 1:
+            camera = camera or -1
+            return [
+                get_image(sys.mj_model, state, height, width, camera)
+                for state in tqdm(trajectory, desc="Rendering frames")
+            ]
+        else:
+            # Prepare arguments for multiprocessing
+            args = [(sys.mj_model, state, height, width) for state in trajectory]
+            return Parallel(n_jobs=-1, backend="loky")(
+                delayed(get_image)(*arg) for arg in tqdm(args, desc="Rendering frames")
+            )
 
 
-  return get_image(sys, trajectory, height, width, camera)
-
+    return get_image(sys.mj_model, trajectory, height, width)
 
 def render(
     sys: brax.System,
