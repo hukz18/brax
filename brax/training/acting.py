@@ -70,7 +70,7 @@ def render_video(
 
     # Render and save videos for each camera
     # for camera in ["perspective", "side", "top", "front"]:
-    jax.debug.print('q shape {q_shape}', q_shape=rollout[0].q.shape)
+
     video_path = os.path.join("results", run_name, "videos", f"train_{current_step}.mp4")
     os.makedirs(os.path.dirname(video_path), exist_ok=True)
     media.write_video(

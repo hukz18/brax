@@ -180,3 +180,65 @@ def compute_ppo_loss(
       'v_loss': v_loss,
       'entropy_loss': entropy_loss
   }
+
+def compute_ppo_value_loss(
+    params: PPONetworkParams,
+    normalizer_params: Any,
+    data: types.Transition,
+    rng: jnp.ndarray,
+    ppo_network: ppo_networks.PPONetworks,
+    discounting: float = 0.9,
+    reward_scaling: float = 1.0,
+    gae_lambda: float = 0.95,
+    normalize_advantage: bool = True) -> Tuple[jnp.ndarray, types.Metrics]:
+  """Computes PPO value loss.
+
+  Args:
+    params: Network parameters,
+    normalizer_params: Parameters of the normalizer.
+    data: Transition that with leading dimension [B, T]. extra fields required
+      are ['state_extras']['truncation'] ['policy_extras']['raw_action']
+        ['policy_extras']['log_prob']
+    rng: Random key
+    ppo_network: PPO networks.
+    discounting: discounting,
+    reward_scaling: reward multiplier.
+    gae_lambda: General advantage estimation lambda.
+    normalize_advantage: whether to normalize advantage estimate
+
+  Returns:
+    A tuple (loss, metrics)
+  """
+
+  value_apply = ppo_network.value_network.apply
+
+  # Put the time dimension first.
+  data = jax.tree_util.tree_map(lambda x: jnp.swapaxes(x, 0, 1), data)
+
+  baseline = value_apply(normalizer_params, params.value, data.privileged_observation)
+
+  bootstrap_value = value_apply(normalizer_params, params.value,
+                                data.next_privileged_observation[-1])
+
+  rewards = data.reward * reward_scaling
+  truncation = data.extras['state_extras']['truncation']
+  termination = (1 - data.discount) * (1 - truncation)
+
+  vs, advantages = compute_gae(
+      truncation=truncation,
+      termination=termination,
+      rewards=rewards,
+      values=baseline,
+      bootstrap_value=bootstrap_value,
+      lambda_=gae_lambda,
+      discount=discounting)
+  if normalize_advantage:
+    advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
+  # Value function loss
+  v_error = vs - baseline
+  v_loss = jnp.mean(v_error * v_error) * 0.5 * 0.5
+
+  return v_loss, {
+      'v_loss': v_loss,
+  }
