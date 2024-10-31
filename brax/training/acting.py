@@ -63,6 +63,7 @@ def render_video(
     render_every: int = 4,
     height: int = 480,
     width: int = 640,
+    render_eval: bool = True,
 ):
     # Define paths for each camera's video
     video_paths: List[str] = []
@@ -70,8 +71,9 @@ def render_video(
 
     # Render and save videos for each camera
     # for camera in ["perspective", "side", "top", "front"]:
-
     video_path = os.path.join("results", run_name, "videos", f"train_{current_step}.mp4")
+    if render_eval:
+        video_path = video_path.replace("train", "eval")
     os.makedirs(os.path.dirname(video_path), exist_ok=True)
     media.write_video(
         video_path,

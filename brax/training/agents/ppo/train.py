@@ -43,7 +43,7 @@ import jax.numpy as jnp
 import numpy as np
 import optax
 from orbax import checkpoint as ocp
-
+from brax.training.acting import render_video
 
 InferenceParams = Tuple[running_statistics.NestedMeanStd, Params]
 Metrics = types.Metrics
@@ -103,7 +103,8 @@ def train(
     progress_fn: Callable[[int, Metrics], None] = lambda *args: None,
     normalize_advantage: bool = True,
     eval_env: Optional[envs.Env] = None,
-    render_interval: Optional[int] = 0,
+    render_eval_interval: Optional[int] = 0,
+    render_train_interval: Optional[int] = 0,
     pretrain_value_percent: Optional[float] = 0,
     policy_params_fn: Callable[..., None] = lambda *args: None,
     randomization_fn: Optional[
@@ -198,7 +199,6 @@ def train(
       )
   ).astype(int)
   print(f'num_timesteps {num_timesteps}')
-
   print(f'num_training_steps_per_epoch {num_training_steps_per_epoch}')
   print(f'env_step_per_training_step {env_step_per_training_step}')
   print(f'num_evals_after_init {num_evals_after_init}')
@@ -347,6 +347,9 @@ def train(
     # Have leading dimensions (batch_size * num_minibatches, unroll_length)
     data = jax.tree_util.tree_map(lambda x: jnp.swapaxes(x, 1, 2), data)
     data = jax.tree_util.tree_map(lambda x: jnp.reshape(x, (-1,) + x.shape[2:]), data)
+    # jax.debug.print('state info step {data_shape}, episode {episode}', data_shape=state.info['step'].mean(), episode=state.info['episode_num'].mean())
+    # data.extras['pipeline_states']['q'] has shape (batch_size * num_minibatches, unroll_length, q_dim)
+    # render_video(env, jax.tree_util.tree_map(lambda x: jnp.swapaxes(x, 0, 1), data).extras['pipeline_states'], run_name, state.info['step'].mean(), 1)
     assert data.discount.shape[1:] == (unroll_length,)
 
     # Update normalization params and normalize observations.
@@ -365,7 +368,7 @@ def train(
         params=params,
         normalizer_params=normalizer_params,
         env_steps=training_state.env_steps + env_step_per_training_step)
-    return (new_training_state, state, new_key), metrics
+    return (new_training_state, state, new_key), (metrics, data.extras['pipeline_states'])
 
 
 
@@ -373,12 +376,12 @@ def train(
                      key: PRNGKey, pretrain_value: bool) -> Tuple[TrainingState, envs.State, Metrics]:
     gradient_update_fn = value_gradient_update_fn if pretrain_value else full_gradient_update_fn
     
-    (training_state, state, _), loss_metrics = jax.lax.scan(
+    (training_state, state, _), (loss_metrics, rollout_states) = jax.lax.scan(
         functools.partial(training_step, gradient_update_fn=gradient_update_fn), 
         (training_state, state, key), (),
         length=num_training_steps_per_epoch)
     loss_metrics = jax.tree_util.tree_map(jnp.mean, loss_metrics)
-    return training_state, state, loss_metrics
+    return training_state, state, loss_metrics, rollout_states
 
   training_epoch = jax.pmap(training_epoch, axis_name=_PMAP_AXIS_NAME, static_broadcasted_argnums=(3,))
 
@@ -390,7 +393,7 @@ def train(
     t = time.time()
     training_state, env_state = _strip_weak_type((training_state, env_state))
     result = training_epoch(training_state, env_state, key, pretrain_value)
-    training_state, env_state, metrics = _strip_weak_type(result)
+    training_state, env_state, metrics, rollout_states = _strip_weak_type(result)
 
     metrics = jax.tree_util.tree_map(jnp.mean, metrics)
     jax.tree_util.tree_map(lambda x: x.block_until_ready(), metrics)
@@ -405,7 +408,7 @@ def train(
         'training/walltime': training_walltime,
         **{f'training/{name}': value for name, value in metrics.items()}
     }
-    return training_state, env_state, metrics  # pytype: disable=bad-return-type  # py311-upgrade
+    return training_state, env_state, metrics, rollout_states  # pytype: disable=bad-return-type  # py311-upgrade
 
   # Initialize model params and training state.
   init_params = ppo_losses.PPONetworkParams(
@@ -475,7 +478,7 @@ def train(
       episode_length=episode_length,
       action_repeat=action_repeat,
       key=eval_key,
-      render_interval=render_interval,
+      render_interval=render_eval_interval,
     )
 
   # Run initial eval
@@ -492,6 +495,7 @@ def train(
   training_metrics = {}
   training_walltime = 0
   current_step = 0
+  render_rollout_stack, render_rollout_interval = 16, 4
   for it in range(num_evals_after_init):
     logging.info('starting iteration %s %s', it, time.time() - xt)
     pretrain_value = it < num_evals_after_init * pretrain_value_percent
@@ -500,9 +504,15 @@ def train(
       # optimization
       epoch_key, local_key = jax.random.split(local_key)
       epoch_keys = jax.random.split(epoch_key, local_devices_to_use)
-      (training_state, env_state, training_metrics) = (
+      (training_state, env_state, training_metrics, rollout_states) = (
           training_epoch_with_timing(training_state, env_state, epoch_keys, pretrain_value=pretrain_value)
       )
+      if render_train_interval and it % render_train_interval == 0:
+        rollout_states = jax.tree_util.tree_map(lambda x: x[0, -1, ::render_rollout_interval], rollout_states)
+        rollout_states = jax.tree_util.tree_map(lambda x: jnp.reshape(x, (-1, x.shape[1] * render_rollout_stack, x.shape[-1])), rollout_states)
+        rollout_states = jax.tree_util.tree_map(lambda x: jnp.swapaxes(x, 0, 1), rollout_states)
+
+        render_video(env, rollout_states, run_name, current_step, 1, render_eval=False)
       current_step = int(_unpmap(training_state.env_steps))
 
       key_envs = jax.vmap(

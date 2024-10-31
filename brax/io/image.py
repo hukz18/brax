@@ -70,7 +70,14 @@ def get_image(model: mujoco.MjModel, state: base.State, height: int, width: int,
     camera.elevation = -45  # Look down at the models
     # Update the scene with static elements
     renderer.update_scene(data, camera=camera)
+    x_shift_joint_id, y_shift_joint_id = [0], [1]
 
+    if mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, "hang_left_front_x") != -1:
+      for joint_name in ['left_front', 'right_front', 'left_back', 'right_back']:
+        x_shift_joint_id.append(mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, f"hang_{joint_name}_x") + 6) # 6 is the offset for the 6 DOF free joints
+        y_shift_joint_id.append(mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, f"hang_{joint_name}_y") + 6)
+    x_shift_joint_id = np.array(x_shift_joint_id)
+    y_shift_joint_id = np.array(y_shift_joint_id)
     # Loop over each model in the batch and add its geometry to the scene
     for idx in range(1, num_vis):
       data.qpos, data.qvel = state.q[idx], state.qd[idx]
@@ -82,8 +89,8 @@ def get_image(model: mujoco.MjModel, state: base.State, height: int, width: int,
       y_shift = row * spacing
 
       # Shift the model's position
-      data.qpos[0] += x_shift
-      data.qpos[1] += y_shift
+      data.qpos[x_shift_joint_id] += x_shift
+      data.qpos[y_shift_joint_id] += y_shift
       # Add the model's geoms to the scene
       mujoco.mj_forward(model, data)
       mujoco.mjv_addGeoms(model, data, vopt, pert, catmask, scene)
@@ -112,6 +119,7 @@ def render_array(
             return Parallel(n_jobs=-1, backend="loky")(
                 delayed(get_image)(*arg) for arg in tqdm(args, desc="Rendering frames")
             )
+            # return [get_image(*arg) for arg in tqdm(args, desc="Rendering frames")]
 
 
     return get_image(sys.mj_model, trajectory, height, width)
